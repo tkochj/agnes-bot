@@ -45,3 +45,10 @@ params:
     default: "1024x1024"
     hint: 部分模型支持 1024x1024 / 1024x1792 / 1792x1024 等
     optional: true
+  custom_models:
+    friendly_name: 自定义模型列表
+    description: 用户自行添加的额外模型，英文逗号分隔（插件自动合并到 /生图模型 列表）
+    type: string
+    default: ""
+    hint: 例如 agnes-image-2.0,agnes-image-2.1,my-custom-model
+    optional: true

@@ -158,6 +158,9 @@ class AgnesPlugin(Star):
         self.config = config or {}
         self.last_image_url = None  # 缓存用户最后发送的图片URL
         self.image_model = self.config.get("image_model", "agnes-image-2.1-flash")
+        # 自定义模型（用户在面板配置中填入，逗号分隔）
+        raw_custom = self.config.get("custom_models", "")
+        self.custom_models = [m.strip() for m in raw_custom.split(",") if m.strip()]
         self.video_model = self.config.get("video_model", "agnes-video-v2.0")
         api_key = _auto_discover_api_key(self.config.get("api_key", ""))
         _start_proxy_background(api_key)
@@ -288,20 +291,23 @@ class AgnesPlugin(Star):
             )
             return
         model_name = prompt.strip()
+        # 合并官方模型 + 自定义模型
+        valid_ids = list(self.custom_models)
         try:
             resp = requests.get(f"{PROXY_URL}/v1/models", timeout=5)
             if resp.status_code == 200:
                 models = resp.json().get("data", [])
-                valid_ids = [m.get("id", "") for m in models]
-                if model_name not in valid_ids:
-                    mlist = "\n".join(f"  - {m}" for m in valid_ids[:10])
-                    yield event.plain_result(
-                        f"❌ 未知模型「{model_name}」\n"
-                        f"可用模型：\n{mlist}"
-                    )
-                    return
+                valid_ids += [m.get("id", "") for m in models]
         except:
             pass
+        if model_name not in valid_ids and valid_ids:
+            mlist = "\n".join(f"  - {m}" for m in valid_ids[:15])
+            yield event.plain_result(
+                f"❌ 未知模型「{model_name}」\n"
+                f"可用模型（前15个）：\n{mlist}\n"
+                "💡 如果是自定义模型，请在插件配置 → custom_models 中添加"
+            )
+            return
         if "video" in model_name.lower():
             self.video_model = model_name
             yield event.plain_result(f"✅ 生视频模型已切换为: {model_name}")
