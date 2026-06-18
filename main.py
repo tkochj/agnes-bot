@@ -115,13 +115,24 @@ def _find_api_key(configured_key: str = "") -> str:
 
 def _upload_image(file_path: str) -> str:
     """将本地图片上传为公网可访问 URL"""
-    if not file_path or not os.path.exists(file_path):
+    if not file_path:
         return file_path
     if file_path.startswith(("http://", "https://", "data:")):
         return file_path
 
+    # 如果文件不存在，尝试从缓存或 temp 找
+    if not os.path.exists(file_path):
+        logger.warning(f"[Agnes] 文件不存在，尝试查找: {file_path}")
+        found = _find_latest_image()
+        if found:
+            file_path = found
+            logger.info(f"[Agnes] 改用 temp 最新图片: {os.path.basename(found)}")
+        else:
+            logger.error(f"[Agnes] 找不到任何图片文件")
+            return file_path
+
     try:
-        logger.info(f"[Agnes] 上传本地图片: {file_path}")
+        logger.info(f"[Agnes] 上传本地图片: {file_path} ({os.path.getsize(file_path)}B)")
         with open(file_path, "rb") as f:
             ext = os.path.splitext(file_path)[1].lower() or ".jpg"
             resp = requests.post(
@@ -137,11 +148,27 @@ def _upload_image(file_path: str) -> str:
                 return url
             logger.warning(f"[Agnes] freeimage 返回异常: {resp.text[:100]}")
         else:
-            logger.warning(f"[Agnes] 上传失败: {resp.status_code}")
+            logger.warning(f"[Agnes] freeimage 失败: {resp.status_code}")
     except Exception as e:
-        logger.error(f"[Agnes] 上传异常: {e}")
+        logger.warning(f"[Agnes] freeimage 异常: {e}")
 
-    # 回退 data URI
+    # 后备：imgbb
+    try:
+        with open(file_path, "rb") as f:
+            resp = requests.post(
+                "https://api.imgbb.com/1/upload?key=6a8a6e34af97cb4c00b6c76a5f764d77",
+                files={"image": f},
+                timeout=30,
+            )
+        if resp.status_code == 200:
+            url = resp.json().get("data", {}).get("url", "")
+            if url:
+                logger.info(f"[Agnes] imgbb 上传成功: {url}")
+                return url
+    except Exception as e:
+        logger.warning(f"[Agnes] imgbb 异常: {e}")
+
+    # final fallback：data URI
     try:
         with open(file_path, "rb") as f:
             data = f.read()
@@ -150,8 +177,12 @@ def _upload_image(file_path: str) -> str:
                     ".gif": "image/gif", ".webp": "image/webp"}
         mime = mime_map.get(ext, "image/jpeg")
         b64 = __import__("base64").b64encode(data).decode()
-        return f"data:{mime};base64,{b64}"
-    except:
+        uri = f"data:{mime};base64,{b64}"
+        # data URI 太长就截断日志
+        logger.info(f"[Agnes] 使用 data URI ({len(b64)}B base64)")
+        return uri
+    except Exception as e:
+        logger.error(f"[Agnes] data URI 回退也失败: {e}")
         return file_path
 
 
@@ -336,12 +367,61 @@ class AgnesPlugin(Star):
             except Exception:
                 pass
 
-        # 缓存本次结果
+        # 缓存本次结果 + 本地文件拷贝到插件缓存
         if img_url:
             self.last_image_url = img_url
             _write_cache(img_url)
+            # 如果是本地路径，拷贝到插件缓存目录防止被清理
+            if not img_url.startswith(("http://", "https://", "data:")):
+                if os.path.exists(img_url):
+                    cache_dir = os.path.dirname(CACHE_FILE)
+                    os.makedirs(cache_dir, exist_ok=True)
+                    cached_copy = os.path.join(cache_dir, "cached_image" + os.path.splitext(img_url)[1])
+                    try:
+                        import shutil
+                        shutil.copy2(img_url, cached_copy)
+                        logger.info(f"[Agnes] 已拷贝到缓存: {os.path.basename(cached_copy)}")
+                    except Exception:
+                        pass
+                else:
+                    # 文件已被清理 → 从 temp 目录重新找
+                    logger.warning(f"[Agnes] 缓存图片文件已不存在: {img_url}")
+                    found = _find_latest_image()
+                    if found and found != img_url:
+                        img_url = found
+                        self.last_image_url = found
+                        _write_cache(found)
 
         return img_url
+
+    # ─── 自动缓存图片（拦截所有消息） ───
+
+    @filter.regex(r".*")
+    async def auto_cache_image(self, event: AstrMessageEvent):
+        """静默缓存所有消息中的图片"""
+        try:
+            msg_obj = getattr(event, "message_obj", None)
+            if not msg_obj:
+                return
+            chain = getattr(msg_obj, "message", [])
+            for comp in chain:
+                ctype = getattr(comp, "type", "")
+                if ctype == "image":
+                    img_url = (getattr(comp, "url", "") or getattr(comp, "file", "")
+                               or getattr(comp, "path", ""))
+                    if img_url:
+                        # 本地文件 → 复制到插件缓存目录
+                        if not img_url.startswith(("http://", "https://", "data:")):
+                            if os.path.exists(img_url):
+                                # 直接缓存路径
+                                _write_cache(img_url)
+                                logger.info(f"[Agnes] 自动缓存图片: {os.path.basename(img_url)}")
+                        else:
+                            _write_cache(img_url)
+                            logger.info(f"[Agnes] 自动缓存 URL 图片")
+                    break
+        except Exception:
+            pass
 
     # ─── 命令：缓存图片 ───
 
