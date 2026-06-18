@@ -156,25 +156,34 @@ def _upload_image(file_path: str) -> str:
 
 
 def _find_latest_image() -> str:
-    """从 temp 目录找最新图片"""
-    try:
-        temp_dir = os.path.abspath(
-            os.path.join(PLUGIN_DIR, "..", "..", "..", "..", "data", "temp")
-        )
-        if not os.path.exists(temp_dir):
-            return ""
+    """从 temp 目录找最新图片，扫描多个可能的 temp 路径"""
+    candidates = [
+        # 优先：core/data/temp（AstrBot 实际存储）
+        os.path.abspath(os.path.join(PLUGIN_DIR, "..", "..", "..", "data", "temp")),
+        # 备选：data/temp（其他部署方式）
+        os.path.abspath(os.path.join(PLUGIN_DIR, "..", "..", "..", "..", "data", "temp")),
+    ]
 
-        imgs = []
-        for ext in ("*.jpg", "*.jpeg", "*.png", "*.gif", "*.webp"):
-            imgs.extend(glob.glob(os.path.join(temp_dir, ext)))
-        if not imgs:
-            return ""
-        latest = max(imgs, key=os.path.getmtime)
-        logger.info(f"[Agnes] 从 temp 找到最新图片: {os.path.basename(latest)}")
-        return latest
-    except Exception as e:
-        logger.debug(f"[Agnes] 查找 temp 图片失败: {e}")
-        return ""
+    best_img = ""
+    best_mtime = 0
+    now = time.time()
+
+    for temp_dir in candidates:
+        if not os.path.exists(temp_dir):
+            continue
+        for ext in ("*.jpg", "*.jpeg", "*.png", "*.gif", "*.webp", "*.bmp"):
+            for fp in glob.glob(os.path.join(temp_dir, ext)):
+                mtime = os.path.getmtime(fp)
+                # 只看最近 2 分钟内的图片
+                if now - mtime > 120:
+                    continue
+                if mtime > best_mtime:
+                    best_mtime = mtime
+                    best_img = fp
+
+    if best_img:
+        logger.info(f"[Agnes] 从 temp 找到最新图片: {os.path.basename(best_img)} ({int(now - best_mtime)}s ago)")
+    return best_img
 
 
 def _read_cache() -> str:
@@ -246,26 +255,49 @@ class AgnesPlugin(Star):
     def _extract_image(self, event: AstrMessageEvent, prompt: str = "") -> str:
         """
         从事件中提取图片 URL，优先级：
-        消息组件 > 消息文本 URL > prompt URL > 缓存 > temp 目录最新图
+        message_obj.message > get_messages() > 消息文本 URL > prompt URL > 缓存 > temp 目录最新图
         """
         img_url = None
 
-        # 1. 消息组件
+        # 1. 直接从 message_obj.message 取（比 get_messages() 更可靠）
         try:
-            for comp in event.get_messages():
-                if hasattr(comp, "type") and comp.type == "image":
-                    img_url = comp.url or comp.file
-                    break
-                if hasattr(comp, "url") and comp.url:
-                    img_url = comp.url
-                    break
-                if hasattr(comp, "file") and comp.file:
-                    img_url = comp.file
-                    break
+            msg_obj = getattr(event, "message_obj", None)
+            if msg_obj:
+                chain = getattr(msg_obj, "message", [])
+                for comp in chain:
+                    ctype = getattr(comp, "type", "")
+                    if ctype == "image":
+                        img_url = getattr(comp, "url", "") or getattr(comp, "file", "") or getattr(comp, "path", "")
+                        break
+                    # 也检查 Record 类型（部分平台图片走 record）
+                    if ctype == "record":
+                        for attr in ("url", "file", "path"):
+                            v = getattr(comp, attr, "")
+                            if v:
+                                img_url = v
+                                break
+                        if img_url:
+                            break
         except Exception:
             pass
 
-        # 2. 文本中的 URL
+        # 2. event.get_messages() 后备
+        if not img_url:
+            try:
+                for comp in event.get_messages():
+                    if hasattr(comp, "type") and comp.type == "image":
+                        img_url = comp.url or comp.file or getattr(comp, "path", "")
+                        break
+                    if hasattr(comp, "url") and comp.url:
+                        img_url = comp.url
+                        break
+                    if hasattr(comp, "file") and comp.file:
+                        img_url = comp.file
+                        break
+            except Exception:
+                pass
+
+        # 3. 文本中的 URL
         if not img_url:
             raw = getattr(event, "message_str", "") or ""
             urls = re.findall(r"https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp|bmp)", raw, re.IGNORECASE)
