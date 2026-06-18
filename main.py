@@ -236,7 +236,7 @@ class AgnesPlugin(Star):
                     "model": "agnes-video-v2.0",
                     "prompt": prompt,
                 },
-                timeout=30,
+                timeout=120,
             )
 
             if resp.status_code != 202:
@@ -360,30 +360,34 @@ class AgnesPlugin(Star):
             yield event.plain_result("❌ Agnes Proxy 未运行")
 
     def _upload_to_public_url(self, file_path: str) -> str:
-        """使用 agnes-ai-cli 将本地图片上传为公网可访问的 URL"""
+        """将本地图片上传为公网可访问的 URL
+        优先用 freeimage.host API，失败后回退到 data URI"""
         if not file_path or not os.path.exists(file_path):
             return file_path
         # 已经是 HTTP URL，无需上传
-        if file_path.startswith('http://') or file_path.startswith('https://'):
+        if isinstance(file_path, str) and (file_path.startswith('http://') or file_path.startswith('https://') or file_path.startswith('data:')):
             return file_path
         try:
             logger.info(f"[Agnes] 上传本地图片到公网: {file_path}")
-            result = subprocess.run(
-                ["npx", "-y", "agnes-ai-cli@^0.1.0", "media", "url", file_path],
-                capture_output=True, text=True, timeout=60,
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0,
-            )
-            if result.returncode == 0:
-                url = result.stdout.strip()
-                logger.info(f"[Agnes] 上传成功: {url}")
-                return url
-            else:
-                logger.error(f"[Agnes] 上传失败: {result.stderr[:200]}")
-                # 尝试用 Base64 内嵌
-                return self._file_to_data_uri(file_path)
+            import requests
+            with open(file_path, 'rb') as f:
+                resp = requests.post(
+                    "https://freeimage.host/api/1/upload",
+                    data={"key": "6d207e02198a847aa98d0a2a901485a5", "format": "json"},
+                    files={"source": (os.path.basename(file_path), f, "image/jpeg")},
+                    timeout=30
+                )
+            if resp.status_code == 200:
+                data = resp.json()
+                url = data.get("image", {}).get("url", "")
+                if url:
+                    logger.info(f"[Agnes] 上传成功: {url}")
+                    return url
+            logger.warning(f"[Agnes] freeimage 上传失败: {resp.status_code} {resp.text[:100]}")
         except Exception as e:
             logger.error(f"[Agnes] 上传异常: {e}")
-            return self._file_to_data_uri(file_path)
+        # 回退到 data URI
+        return self._file_to_data_uri(file_path)
     
     def _file_to_data_uri(self, file_path: str) -> str:
         """将本地图片转为 data URI（某些 API 支持）"""
@@ -438,7 +442,26 @@ class AgnesPlugin(Star):
         if not img_url and self.last_image_url:
             img_url = self.last_image_url
 
-        # 5. 检查工作区缓存文件（由助手上传后写入）
+        # 5. 从 temp 目录找最新图片作为后备（用户先发了图再发命令的情况）
+        if not img_url:
+            try:
+                temp_dir = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+                    "data", "temp"
+                )
+                if os.path.exists(temp_dir):
+                    jpgs = glob.glob(os.path.join(temp_dir, "*.jpg"))
+                    pngs = glob.glob(os.path.join(temp_dir, "*.png"))
+                    all_imgs = jpgs + pngs
+                    if all_imgs:
+                        # 按修改时间排序，取最新的
+                        latest = max(all_imgs, key=os.path.getmtime)
+                        img_url = latest
+                        logger.info(f"📸 从 temp 找到最新图片: {os.path.basename(latest)}")
+            except:
+                pass
+        
+        # 6. 检查工作区缓存文件（由助手上传后写入）
         if not img_url:
             try:
                 cache_path = os.path.join(
@@ -572,7 +595,7 @@ class AgnesPlugin(Star):
                     "prompt": prompt,
                     "image": image_url,
                 },
-                timeout=30,
+                timeout=120,
             )
 
             if resp.status_code != 202:
