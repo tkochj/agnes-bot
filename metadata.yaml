@@ -14,8 +14,13 @@ desc: |-
   - /生视频 <描述>      文生视频
   - /图生视频 <描述>    图生视频（需先发图片）
   - /生图模型           查看可用模型
+  - /设置模型 <模型名>  动态切换模型
+  
+  📦 仓库: https://github.com/tkochj/agnes-bot
+  📖 模型文档: 查看 Agnes AI 官方文档获取最新模型列表
 version: v2.1.0
 author: auto
+repo: https://github.com/tkochj/agnes-bot
 params:
   api_key:
     friendly_name: Agnes API Key
