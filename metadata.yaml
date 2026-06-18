@@ -1,47 +1,64 @@
 name: astrbot_plugin_agnes
 display_name: 🎨 Agnes AI 生图/生视频
-short_desc: 一键生图、生视频，支持 agnes-image-2.1-flash 和 agnes-video-v2.0
+short_desc: 一键生图、生视频，支持多模型后端（Agnes / OpenAI DALL-E / SiliconFlow）
 desc: |-
-  在本地运行 Agnes AI Proxy，提供 OpenAI 兼容的生图/生视频接口。
+  多提供商 AI 生图/生视频插件，直连远端 API，无需本地 Proxy。
   
-  🔧 配置方法（二选一）：
-  1. 在 AstrBot 面板 → 插件配置 → 填入 api_key
-  2. 在 cmd_config.json 中找到 "openai" provider 中指向 127.0.0.1:1241 的 key（插件自动识别）
+  🔌 支持的提供商：
+  - agnes:      Agnes AI（生图 + 生视频，默认）
+  - openai:     OpenAI DALL-E 3（生图）
+  - siliconflow: SiliconFlow 开源模型（生图）
   
-  💬 命令：
+  💡 切换提供商：/提供商 <名称>
+  
+  🚀 命令：
   - /画图 <描述>        文生图
   - /改图 <描述>        图改图（需先发图片）
   - /生视频 <描述>      文生视频
   - /图生视频 <描述>    图生视频（需先发图片）
   - /生图模型           查看可用模型
-  - /设置模型 <模型名>  动态切换模型
+  - /设置模型 <模型名>  切换模型
+  - /提供商            查看/切换 AI 提供商
+  - /agnes             查看插件状态
   
   📦 仓库: https://github.com/tkochj/agnes-bot
-  📖 模型文档: 查看 Agnes AI 官方文档获取最新模型列表
+  
+  ✨ v2.1 新特性：
+  - 多提供商架构，直连 API 无需 Proxy
+  - 支持 OpenAI DALL-E 3、SiliconFlow
+  - 本地图片上传自动处理（freeimage.host / data URI 回退）
+  - 50+ 开源模型可选（通过 SiliconFlow）
 version: v2.1.0
 author: auto
 repo: https://github.com/tkochj/agnes-bot
 params:
+  provider:
+    friendly_name: AI 提供商
+    description: 选择 AI 后端，可选 agnes / openai / siliconflow
+    type: string
+    default: "agnes"
+    hint: 运行时可用 /提供商 命令切换
+    optional: true
   api_key:
-    friendly_name: Agnes API Key
-    description: Agnes AI 的 API Key，与 openai provider 中指向 127.0.0.1:1241 的 key 一致
+    friendly_name: API Key
+    description: AI 提供商的 API Key（自动从 cmd_config.json 或环境变量发现）
     type: string
     default: ""
-    hint: 在 cmd_config.json 中 openai provider 配的 key
+    hint: 不填则自动从 cmd_config.json / 环境变量读取
     optional: true
   image_model:
     friendly_name: 默认生图模型
-    description: 文生图/图改图使用的模型，如 agnes-image-2.1-flash
+    description: 文生图/图改图使用的模型
     type: string
     default: "agnes-image-2.1-flash"
-    hint: 可用 /生图模型 查看全部模型 /设置模型 动态切换
+    hint: 可用 /生图模型 查看全部，/设置模型 动态切换
     optional: true
   video_model:
     friendly_name: 默认生视频模型
-    description: 文生视频/图生视频使用的模型，如 agnes-video-v2.0
+    description: 文生视频/图生视频使用的模型
     type: string
     default: "agnes-video-v2.0"
-    hint: 可用 /生图模型 查看全部模型 /设置模型 动态切换
+    hint: 可用 /生图模型 查看全部，/设置模型 动态切换
     optional: true
   image_size:
     friendly_name: 默认图片尺寸
@@ -52,8 +69,8 @@ params:
     optional: true
   custom_models:
     friendly_name: 自定义模型列表
-    description: 用户自行添加的额外模型，英文逗号分隔（插件自动合并到 /生图模型 列表）
+    description: 用户自行添加的额外模型，英文逗号分隔
     type: string
     default: ""
-    hint: 例如 agnes-image-2.0,agnes-image-2.1,my-custom-model
+    hint: 例如 agnes-image-2.0,my-custom-model
     optional: true
