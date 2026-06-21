@@ -51,7 +51,7 @@ def _find_api_key(configured_key: str = "") -> str:
     """
     自动发现 API Key，优先级：
     1. 插件配置中手动填入的 api_key
-    2. AstrBot provider 配置中指向 127.0.0.1:1241 的 key（向后兼容）
+    2. AstrBot provider 配置中指向 127.0.0.1:1241 或 apihub.agnes-ai.com 的 key
     3. 环境变量 AGNES_API_KEY / OPENAI_API_KEY
     """
     if configured_key:
@@ -78,9 +78,12 @@ def _find_api_key(configured_key: str = "") -> str:
                         if depth > 8:
                             return None
                         if isinstance(obj, dict):
-                            # 找指向 127.0.0.1:1241 的 key（旧版 Proxy 兼容）
+                            # 向后兼容：旧版 Proxy (127.0.0.1:1241)
                             api_base = obj.get("api_base", "")
-                            if "127.0.0.1" in api_base and "1241" in api_base:
+                            is_old_proxy = "127.0.0.1" in api_base and "1241" in api_base
+                            # 新版直连：apihub.agnes-ai.com
+                            is_new_direct = "apihub.agnes-ai.com" in api_base
+                            if is_old_proxy or is_new_direct:
                                 key_list = obj.get("key", [])
                                 if isinstance(key_list, list) and key_list and key_list[0]:
                                     return key_list[0].strip()
